@@ -1,0 +1,19 @@
+{
+  "name": "discord-247-manager",
+  "version": "1.0.0",
+  "description": "Multi-token voice controller",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@discordjs/opus": "^0.9.0",
+    "@discordjs/voice": "^0.16.0",
+    "debug": "^4.3.4",
+    "discord.js": "^14.14.1",
+    "discord.js-selfbot-v13": "^3.4.4",
+    "dotenv": "^16.4.5",
+    "prism-media": "^1.3.5",
+    "sodium-native": "^4.0.1"
+  }
+}
