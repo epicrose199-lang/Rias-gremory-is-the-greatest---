@@ -9,7 +9,10 @@ const {
     StringSelectMenuBuilder, 
     EmbedBuilder, 
     ChannelType, 
-    PermissionFlagsBits 
+    PermissionFlagsBits,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
 } = require('discord.js');
 const { Client: SelfClient, CustomStatus, RichPresence } = require('discord.js-selfbot-v13');
 
@@ -25,6 +28,7 @@ const mainBot = new Client({
 // System maps and constants
 const activeSessions = new Map();
 const spammerLoops = new Map();
+const pendingRpcCache = new Map(); // Dynamic memory storage container tracking modal states
 const prefix = "&"; 
 const OWNER_ID = "1404189983807639672"; 
 
@@ -34,10 +38,11 @@ const MESSAGES = {
     serverInvalid: "Please provide a valid server location ID context.",
     channelInvalid: "Please provide a valid connection channel destination ID context.",
     tokenInvalid: "An unexpected authorization checkpoint error occurred.",
-    maxSessionsReached: "<a:rWarning:1494077439670878329> You have **reached your maximum limit** of 4 simultaneous sessions.\n<a:rArrow:1493252548826763275> Use /247-stop to clean them up",
+    maxSessionsReached: "<a:rWarning:1494077439670878329> You have **reached your maximum limit** of 4 simultaneous sessions.\n<a:rArrow:1493252548826763275> Use /247-stopall to clean them up",
     noActiveSessions: "<a:rWarning:1494077439670878329> You don't have any running **sessions** !",
     noActiveTokens: "<a:rWarning:1494077439670878329> You have no active tokens.",
     allStopped: "<a:rSuccess:1494078302632149083> **All active sessions and tokens have been fully cleared.**\n\n<a:rArrow:1493252548826763275> **Use /247 to run it again <a:rRitaMaid:1494319991187574794>**",
+    slotStopped: (slot) => `<a:rSuccess:1494078302632149083> **Session slot ${slot} was fully shut down and tokens disconnected.**`,
     allRelocated: "<a:rSuccess:1494078302632149083> Relocated all active tokens across your sessions **successfully**",
     processFailed: "<a:rWarning:1494077439670878329> Process complete. No profiles could successfully connect. Verification failed.",
     altMuted: "**<a:rArrow:1493252548826763275> your alts have been muted <:rMicrophone:1507766561723781381>**",
@@ -79,7 +84,13 @@ mainBot.once('ready', async () => {
                 { name: 'token5', description: 'Fifth account token', type: ApplicationCommandOptionType.String, required: false },
             ]
         },
-        { name: '247-stop', description: 'Stop all your running active sessions and tokens' },
+        { 
+            name: '247-stop', 
+            description: 'Stop a specific running session slot',
+            options: [{ name: 'slot', description: 'The active session slot number to destroy (1-4)', type: ApplicationCommandOptionType.Integer, required: true }]
+        },
+        { name: '247-stopall', description: 'Force kill all running sessions and drop connections globally' },
+        { name: '247-storage', description: 'Inspect the active authorization token strings running inside your active memory slots' },
         { name: '247-restart', description: 'Force restart and flush all your active sessions and profiles' },
         {
             name: 'change-place',
@@ -160,8 +171,6 @@ mainBot.once('ready', async () => {
                 { name: 'name', description: 'The primary status title name text', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'state', description: 'Secondary subtext info line detail', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'url', description: 'Stream asset source link (Twitch URL placeholder requirement)', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'large-image-url', description: 'Direct URL to a Large Image or 1MB-5MB GIF', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'small-image-url', description: 'Direct URL to a Small corner Image badge or icon', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'application-id', description: 'Custom App Client ID override (Defaults used if blank)', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
@@ -350,6 +359,41 @@ function cleanRpcImageLink(linkStr) {
     return linkStr;
 }
 
+function applyRpcActivities(userId, cacheObj) {
+    const userSessions = activeSessions.get(userId) || [];
+    userSessions.forEach(session => {
+        session.tokens.forEach(t => {
+            try {
+                if (cacheObj.activityType === 'CLEAR') {
+                    t.selfClient.user.setActivity(null);
+                    return;
+                }
+
+                const pr = new RichPresence(t.selfClient);
+                const resolvedAppId = cacheObj.customAppId || (cacheObj.activityType === 'LISTENING' ? '232924151325491200' : '1213034914101137458');
+                
+                pr.setApplicationId(resolvedAppId);
+                pr.setType(cacheObj.activityType)
+                  .setName(cacheObj.name)
+                  .setState(cacheObj.state);
+
+                if (cacheObj.activityType === 'STREAMING') pr.setURL(cacheObj.url);
+                if (cacheObj.activityType === 'LISTENING') pr.setStartTimestamp(Date.now());
+
+                const largeImg = cleanRpcImageLink(cacheObj.largeImage);
+                const smallImg = cleanRpcImageLink(cacheObj.smallImage);
+
+                if (largeImg) pr.setLargeImage(largeImg);
+                if (smallImg) pr.setSmallImage(smallImg);
+
+                t.selfClient.user.setActivity(pr);
+            } catch (e) {
+                console.error("Failed syncing profile activity structure:", e);
+            }
+        });
+    });
+}
+
 // ==========================================
 // 🛠️ OWNER ONLY PREFIX COMMAND INTERCEPTOR (&setup)
 // ==========================================
@@ -375,11 +419,75 @@ mainBot.on('messageCreate', async (message) => {
 });
 
 // ==========================================
-// 🖱️ INTERACTION ENGINE (SLASHES + INTERACTION TOKENS)
+// 🖱️ INTERACTION ENGINE (SLASHES + MODALS + INTERACTION TOKENS)
 // ==========================================
 mainBot.on('interactionCreate', async (interaction) => {
+    
+    // MODAL DISPATCH SUB-HANDLERS
+    if (interaction.isModalSubmit()) {
+        const { customId, user } = interaction;
+
+        if (customId === 'modal_rpc_large' || customId === 'modal_rpc_small') {
+            await interaction.deferReply({ ephemeral: true }).catch(() => null);
+            const cacheObj = pendingRpcCache.get(user.id);
+            
+            if (!cacheObj) {
+                return interaction.editReply({ content: "❌ Session configuration timing mismatch. Re-run /247-rpc." });
+            }
+
+            if (customId === 'modal_rpc_large') {
+                cacheObj.largeImage = interaction.fields.getTextInputValue('input_rpc_large');
+            } else {
+                cacheObj.smallImage = interaction.fields.getTextInputValue('input_rpc_small');
+            }
+
+            // Sync dynamic parameters across selfbot runtime profiles
+            applyRpcActivities(user.id, cacheObj);
+
+            return interaction.editReply({ 
+                content: `**<a:rSuccess:1494078302632149083> Gallery image configuration metric matched and applied successfully!**` 
+            });
+        }
+    }
+
     if (interaction.isButton()) {
         const { customId, guild, user } = interaction;
+
+        // Gallery Modals for /247-rpc Configuration
+        if (customId === 'btn_rpc_set_large' || customId === 'btn_rpc_set_small') {
+            const cacheObj = pendingRpcCache.get(user.id);
+            if (!cacheObj) {
+                return interaction.reply({ content: "❌ Configuration cache expired. Please run /247-rpc again.", ephemeral: true });
+            }
+
+            if (customId === 'btn_rpc_set_large') {
+                const modal = new ModalBuilder().setCustomId('modal_rpc_large').setTitle('Set Large Asset Image');
+                const imgInput = new TextInputBuilder()
+                    .setCustomId('input_rpc_large')
+                    .setLabel('Paste Gallery Image / GIF Link')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('https://cdn.discordapp.com/attachments/...')
+                    .setValue(cacheObj.largeImage || '')
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(imgInput));
+                return interaction.showModal(modal);
+            }
+
+            if (customId === 'btn_rpc_set_small') {
+                const modal = new ModalBuilder().setCustomId('modal_rpc_small').setTitle('Set Small Corner Badge');
+                const imgInput = new TextInputBuilder()
+                    .setCustomId('input_rpc_small')
+                    .setLabel('Paste Small Icon Link')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('https://cdn.discordapp.com/attachments/...')
+                    .setValue(cacheObj.smallImage || '')
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(imgInput));
+                return interaction.showModal(modal);
+            }
+        }
 
         if (customId === 'setup_btn_mode') {
             const panelEmbed = new EmbedBuilder()
@@ -527,6 +635,24 @@ mainBot.on('interactionCreate', async (interaction) => {
         }
     }
 
+    if (commandName === '247-storage') {
+        if (userSessions.length === 0) return interaction.reply({ content: MESSAGES.noActiveSessions, ephemeral: true }).catch(() => null);
+        
+        let storageOutput = `🔑 **Active Authorization Key Vault Storage**:\n\n`;
+        userSessions.forEach((session, slotIdx) => {
+            storageOutput += `__**Session Slot [ ${slotIdx + 1} ]**__ (Channel: \`${session.channelId}\`)\n`;
+            session.tokens.forEach((tObj, tokenIdx) => {
+                // Obfuscate middle tokens sequence to secure viewing environments safely
+                const tStr = tObj.token;
+                const secureMask = tStr.length > 16 ? `${tStr.slice(0, 7)}...xxxx...${tStr.slice(-5)}` : `*Hidden Security Frame*`;
+                storageOutput += `• TOKEN_${tokenIdx + 1} (${tObj.username}) = \`${secureMask}\`\n`;
+            });
+            storageOutput += `\n`;
+        });
+
+        return interaction.reply({ content: storageOutput, ephemeral: true }).catch(() => null);
+    }
+
     if (commandName === '247-edit') {
         await interaction.deferReply({ ephemeral: true }).catch(() => null);
         const slot = options.getInteger('slot');
@@ -604,7 +730,29 @@ mainBot.on('interactionCreate', async (interaction) => {
         await interaction.editReply(`**<a:rSuccess:1494078302632149083> Restored, reset, and re-synchronized all active profile session routes safely!**`).catch(() => null);
     }
 
+    // Split Stop Logic: Single Slot Target Handler
     if (commandName === '247-stop') {
+        const slot = options.getInteger('slot');
+        const sessionIndex = slot - 1;
+
+        if (!userSessions[sessionIndex]) {
+            return interaction.reply({ content: `<a:rWarning:1494077439670878329> There is no running session allocated to Slot **${slot}**.`, ephemeral: true }).catch(() => null);
+        }
+
+        stopSpammerLoop(user.id, sessionIndex);
+        userSessions[sessionIndex].tokens.forEach(t => {
+            try {
+                sendVoicePayload(t.selfClient, t.serverId, null);
+                t.selfClient.destroy();
+            } catch(e){}
+        });
+
+        userSessions.splice(sessionIndex, 1);
+        return interaction.reply({ content: MESSAGES.slotStopped(slot), ephemeral: true }).catch(() => null);
+    }
+
+    // Split Stop Logic: Destroys All Active Memory Nodes Globally
+    if (commandName === '247-stopall') {
         if (userSessions.length === 0) return interaction.reply({ content: MESSAGES.noActiveSessions, ephemeral: true }).catch(() => null);
         
         userSessions.forEach((session, idx) => {
@@ -724,41 +872,29 @@ mainBot.on('interactionCreate', async (interaction) => {
         const url = options.getString('url') || "https://twitch.tv/directory";
         const customAppId = options.getString('application-id');
 
-        const largeImg = cleanRpcImageLink(options.getString('large-image-url'));
-        const smallImg = cleanRpcImageLink(options.getString('small-image-url'));
+        // Cache parameters to dynamically merge values across upcoming pop-up gallery actions
+        const cacheObj = { activityType, name, state, url, customAppId, largeImage: '', smallImage: '' };
+        pendingRpcCache.set(user.id, cacheObj);
 
-        userSessions.forEach(session => {
-            session.tokens.forEach(t => {
-                try {
-                    if (activityType === 'CLEAR') {
-                        t.selfClient.user.setActivity(null);
-                        return;
-                    }
+        if (activityType === 'CLEAR') {
+            applyRpcActivities(user.id, cacheObj);
+            return interaction.reply({ content: "🗑️ Rich Presence wiped completely clean across accounts.", ephemeral: true });
+        }
 
-                    // FIXED: RichPresence constructor now takes the selfbot client instance context
-                    const pr = new RichPresence(t.selfClient);
-                    
-                    const resolvedAppId = customAppId || (activityType === 'LISTENING' ? '232924151325491200' : '1213034914101137458');
-                    pr.setApplicationId(resolvedAppId);
+        // Apply primary textual configurations immediately
+        applyRpcActivities(user.id, cacheObj);
 
-                    pr.setType(activityType)
-                      .setName(name)
-                      .setState(state);
+        // Deploy asset management button configurations directly to UI framework
+        const assetActionRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('btn_rpc_set_large').setLabel('🖼️ Set Large Gallery Image').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('btn_rpc_set_small').setLabel('🏷️ Set Small Corner Badge').setStyle(ButtonStyle.Secondary)
+        );
 
-                    if (activityType === 'STREAMING') pr.setURL(url);
-                    if (activityType === 'LISTENING') pr.setStartTimestamp(Date.now());
-
-                    if (largeImg) pr.setLargeImage(largeImg);
-                    if (smallImg) pr.setSmallImage(smallImg);
-
-                    t.selfClient.user.setActivity(pr);
-                } catch (e) {
-                    console.error("Failed syncing profile activity structure:", e);
-                }
-            });
+        return interaction.reply({
+            content: `**<a:rSuccess:1494078302632149083> Activity variables loaded successfully.**\n*Optional: Use the interface triggers below to link custom layouts straight from your artwork gallery.*`,
+            components: [assetActionRow],
+            ephemeral: true
         });
-
-        return interaction.reply({ content: `**<a:rSuccess:1494078302632149083> Successfully loaded, calibrated, and updated profile Rich Presence across active accounts!**`, ephemeral: true }).catch(() => null);
     }
 
     if (commandName === '247-spammer') {
