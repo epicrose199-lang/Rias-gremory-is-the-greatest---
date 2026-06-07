@@ -185,8 +185,8 @@ mainBot.once('ready', async () => {
                 { name: 'state', description: 'Secondary subtext info line detail', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'url', description: 'Stream link (Required for STREAMING type)', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'application-id', description: 'Custom Application Client ID override', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'large-image', description: 'Developer Gallery Asset Name string OR direct image link URL', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'small-image', description: 'Developer Gallery Asset Name string OR direct round image link URL', type: ApplicationCommandOptionType.String, required: false }
+                { name: 'large-image', description: 'Developer Gallery Asset Name string', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'small-image', description: 'Developer Gallery Asset Name string', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
         {
@@ -196,8 +196,8 @@ mainBot.once('ready', async () => {
                 { name: 'name', description: 'Update status title name text', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'state', description: 'Update secondary subtext line detail', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'url', description: 'Update streaming channel link', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'large-image', description: 'Update gallery asset text name OR image web link', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'small-image', description: 'Update gallery asset text name OR image web link', type: ApplicationCommandOptionType.String, required: false }
+                { name: 'large-image', description: 'Update gallery asset text name', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'small-image', description: 'Update gallery asset text name', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
         {
