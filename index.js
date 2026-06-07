@@ -11,7 +11,7 @@ const {
     ChannelType, 
     PermissionFlagsBits
 } = require('discord.js');
-const { Client: SelfClient, CustomStatus, RichPresence } = require('discord.js-selfbot-v13');
+const { Client: SelfClient, RichPresence } = require('discord.js-selfbot-v13');
 
 const mainBot = new Client({
     intents: [
@@ -24,6 +24,7 @@ const mainBot = new Client({
 
 const activeSessions = new Map();
 const spammerLoops = new Map();
+const savedRpcLayouts = new Map(); 
 const prefix = "&"; 
 const OWNER_ID = "1404189983807639672"; 
 
@@ -40,13 +41,13 @@ const MESSAGES = {
     slotRelocated: (slot) => `<a:rSuccess:1494078302632149083> Relocated session slot **${slot}** to its new location successfully!`,
     allRelocated: "<a:rSuccess:1494078302632149083> Relocated all active tokens across your sessions **successfully**",
     processFailed: "<a:rWarning:1494077439670878329> Process complete. No profiles could successfully connect. Verification failed.",
-    altMuted: "**<a:rArrow:1493252548826763275> your alts have been muted <:rMicrophone:1507766561723781381>**",
-    altUnmuted: "**<a:rArrow:1493252548826763275> your alts have been unmuted successfully**",
-    altDeafened: "**<a:rArrow:1493252548826763275> your alts have been deafened <:rDeafen:1494357361694085121>**",
-    altUndeafened: "**<a:rArrow:1493252548826763275> your alts have been undeafened**",
+    altMuted: (target) => `**<a:rArrow:1493252548826763275> Alts inside ${target} have been muted <:rMicrophone:1507766561723781381>**`,
+    altUnmuted: (target) => `**<a:rArrow:1493252548826763275> Alts inside ${target} have been unmuted successfully**`,
+    altDeafened: (target) => `**<a:rArrow:1493252548826763275> Alts inside ${target} have been deafened <:rDeafen:1494357361694085121>**`,
+    altUndeafened: (target) => `**<a:rArrow:1493252548826763275> Alts inside ${target} have been undeafened**`,
     statusUpdated: (statusName) => `**<a:rArrow:1493252548826763275> your alts status has been updated to ${statusName} successfully**`,
-    cameraUpdated: (flag) => `**<a:rArrow:1493252548826763275> Camera mode set to **${flag.toUpperCase()}** across active alts.**`,
-    liveUpdated: (flag) => `**<a:rArrow:1493252548826763275> Voice Channel Red Live stream mode set to **${flag.toUpperCase()}** across active alts.**`,
+    cameraUpdated: (target, flag) => `**<a:rArrow:1493252548826763275> Camera mode set to **${flag.toUpperCase()}** across ${target}.**`,
+    liveUpdated: (target, flag) => `**<a:rArrow:1493252548826763275> Voice Channel Red Live stream mode set to **${flag.toUpperCase()}** across ${target}.**`,
     spammerUpdated: (flag) => `**<a:rArrow:1493252548826763275> Background text spammer state switched to: **${flag.toUpperCase()}****`,
     editSuccess: (slot) => `**<a:rSuccess:1494078302632149083> Session slot ${slot} tokens updated and deployed successfully!**`,
     restartingAll: `**🔄 Restarting all active sessions and re-verifying connection gateways...**`,
@@ -115,23 +116,35 @@ mainBot.once('ready', async () => {
         },
         {
             name: '247-mute',
-            description: 'Mute or unmute all your running tokens',
-            options: [{ name: 'status', description: 'True to mute, False to unmute', type: ApplicationCommandOptionType.Boolean, required: true }]
+            description: 'Mute or unmute your running tokens',
+            options: [
+                { name: 'status', description: 'True to mute, False to unmute', type: ApplicationCommandOptionType.Boolean, required: true },
+                { name: 'slot', description: 'Target specific slot only. Leave blank for all slots.', type: ApplicationCommandOptionType.Integer, required: false }
+            ]
         },
         {
             name: '247-deaf',
-            description: 'Deafen or undeafen all your running tokens',
-            options: [{ name: 'status', description: 'True to deafen, False to undeafen', type: ApplicationCommandOptionType.Boolean, required: true }]
+            description: 'Deafen or undeafen your running tokens',
+            options: [
+                { name: 'status', description: 'True to deafen, False to undeafen', type: ApplicationCommandOptionType.Boolean, required: true },
+                { name: 'slot', description: 'Target specific slot only. Leave blank for all slots.', type: ApplicationCommandOptionType.Integer, required: false }
+            ]
         },
         {
             name: '247-camera',
             description: 'Toggle camera green icon visibility inside your active voice channels',
-            options: [{ name: 'status', description: 'True to switch on, False to switch off', type: ApplicationCommandOptionType.Boolean, required: true }]
+            options: [
+                { name: 'status', description: 'True to switch on, False to switch off', type: ApplicationCommandOptionType.Boolean, required: true },
+                { name: 'slot', description: 'Target specific slot only. Leave blank for all slots.', type: ApplicationCommandOptionType.Integer, required: false }
+            ]
         },
         {
             name: '247-live-badge',
             description: 'Toggle the Red Voice Channel Live stream marker',
-            options: [{ name: 'status', description: 'True to turn on red live view, False to hide', type: ApplicationCommandOptionType.Boolean, required: true }]
+            options: [
+                { name: 'status', description: 'True to turn on red live view, False to hide', type: ApplicationCommandOptionType.Boolean, required: true },
+                { name: 'slot', description: 'Target specific slot only. Leave blank for all slots.', type: ApplicationCommandOptionType.Integer, required: false }
+            ]
         },
         {
             name: '247-status',
@@ -153,7 +166,7 @@ mainBot.once('ready', async () => {
         },
         {
             name: '247-rpc',
-            description: 'Configure standard Rich Activities text layout parameters',
+            description: 'Configure Rich Presence layouts (Text & Media unified combined)',
             options: [
                 {
                     name: 'activity-type',
@@ -165,23 +178,32 @@ mainBot.once('ready', async () => {
                         { name: 'Streaming', value: 'STREAMING' },
                         { name: 'Listening', value: 'LISTENING' },
                         { name: 'Watching', value: 'WATCHING' },
-                        { name: 'Competing', value: 'COMPETING' },
-                        { name: 'Clear Activity', value: 'CLEAR' }
+                        { name: 'Competing', value: 'COMPETING' }
                     ]
                 },
                 { name: 'name', description: 'The primary status title name text', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'state', description: 'Secondary subtext info line detail', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'url', description: 'Stream asset source link (Twitch URL placeholder requirement)', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'application-id', description: 'Custom App Client ID override (Defaults used if blank)', type: ApplicationCommandOptionType.String, required: false }
+                { name: 'url', description: 'Stream link (Required for STREAMING type)', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'application-id', description: 'Custom Application Client ID override', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'large-image', description: 'Large picture media link or text asset key string', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'small-image', description: 'Small round badge picture link or asset key string', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
         {
-            name: '247-rpc-assets',
-            description: 'Upload custom RPC display media right from your gallery choice attachment field',
+            name: '247-rpc-edit',
+            description: 'Edit your existing Rich Presence details dynamically all at once',
             options: [
-                { name: 'large-image', description: 'Select an image or GIF straight from your gallery', type: ApplicationCommandOptionType.Attachment, required: false },
-                { name: 'small-badge', description: 'Select a small icon image straight from your gallery', type: ApplicationCommandOptionType.Attachment, required: false }
+                { name: 'name', description: 'Update status title name text', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'state', description: 'Update secondary subtext line detail', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'url', description: 'Update streaming channel link', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'large-image', description: 'Update large picture media asset asset link', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'small-image', description: 'Update small round badge asset link', type: ApplicationCommandOptionType.String, required: false }
             ]
+        },
+        {
+            name: '247-rpc-toggle',
+            description: 'Turn your custom Rich Presence status visibility display ON or OFF completely',
+            options: [{ name: 'status', description: 'True to enable custom status, False to hide it completely', type: ApplicationCommandOptionType.Boolean, required: true }]
         },
         {
             name: '247-spammer',
@@ -217,17 +239,52 @@ function sendVoicePayload(client, serverId, channelId, mute=false, deaf=false, v
     }
 }
 
-const buildStreamPayload = (serverId, channelId, active) => {
-    return {
-        op: 18, 
-        d: active ? {
-            type: "guild",
-            guild_id: serverId,
-            channel_id: channelId,
-            preferred_region: null
-        } : null
-    };
+// Fixed core voice payload stream parser loop configuration block
+const sendStreamPayload = (client, serverId, channelId, active) => {
+    try {
+        client.ws.broadcast({
+            op: 18, 
+            d: active ? {
+                type: "guild",
+                guild_id: serverId,
+                channel_id: channelId,
+                preferred_region: null
+            } : null
+        });
+    } catch(e) {
+        console.error("Failed handling live gateway broadcasting parameters:", e);
+    }
 };
+
+function syncRichPresenceToClient(t) {
+    const savedLayout = savedRpcLayouts.get(t.userId);
+    if (!savedLayout || !savedLayout.enabled) {
+        try { t.selfClient.user.setActivity(null); } catch(e){}
+        return;
+    }
+
+    try {
+        const pr = new RichPresence(t.selfClient);
+        if (savedLayout.applicationId) pr.setApplicationId(savedLayout.applicationId);
+        if (savedLayout.activityType) pr.setType(savedLayout.activityType);
+        if (savedLayout.name) pr.setName(savedLayout.name);
+        if (savedLayout.state) pr.setState(savedLayout.state);
+        
+        if (savedLayout.activityType === 'STREAMING' && savedLayout.url) {
+            pr.setURL(savedLayout.url);
+        }
+        if (savedLayout.activityType === 'LISTENING') {
+            pr.setStartTimestamp(Date.now());
+        }
+        
+        if (savedLayout.largeImage) pr.setLargeImage(savedLayout.largeImage);
+        if (savedLayout.smallImage) pr.setSmallImage(savedLayout.smallImage);
+
+        t.selfClient.user.setActivity(pr);
+    } catch (e) {
+        console.error(`Error syncing presence layout state for ${t.username}:`, e);
+    }
+}
 
 async function launchSelfbot(userId, token, serverId, channelId, interaction) {
     const selfClient = new SelfClient({ checkUpdate: false, patchVoice: true });
@@ -272,13 +329,17 @@ async function launchSelfbot(userId, token, serverId, channelId, interaction) {
                     if (newState.member.id === selfClient.user.id) {
                         if (!newState.channelId || newState.channelId !== channelId) {
                             await delay(4000);
-                            sendVoicePayload(selfClient, serverId, channelId, oldState.selfMute, oldState.selfDeaf, oldState.selfVideo);
                             
                             const sessionReference = activeSessions.get(userId)?.find(s => s.channelId === channelId);
                             const tokenObj = sessionReference?.tokens.find(t => t.token === token);
-                            if (tokenObj && tokenObj.live) {
-                                try { selfClient.ws.broadcast(buildStreamPayload(serverId, channelId, true)); } catch(e){}
-                            }
+                            
+                            const isMuted = tokenObj ? tokenObj.muted : false;
+                            const isDeaf = tokenObj ? tokenObj.deafened : false;
+                            const isCam = tokenObj ? tokenObj.camera : false;
+                            const isLive = tokenObj ? tokenObj.live : false;
+
+                            sendVoicePayload(selfClient, serverId, channelId, isMuted, isDeaf, isCam);
+                            sendStreamPayload(selfClient, serverId, channelId, isLive);
                         }
                     }
                 });
@@ -290,7 +351,8 @@ async function launchSelfbot(userId, token, serverId, channelId, interaction) {
                     await logChannel.send(logText).catch(() => null);
                 }
 
-                resolve({ 
+                const tObj = { 
+                    userId,
                     token, 
                     selfClient, 
                     serverId, 
@@ -302,7 +364,10 @@ async function launchSelfbot(userId, token, serverId, channelId, interaction) {
                     username: selfClient.user.username,
                     channelName: channel.name,
                     guildName: guild.name
-                });
+                };
+
+                syncRichPresenceToClient(tObj);
+                resolve(tObj);
             } catch (err) {
                 clearTimeout(timeoutTracker);
                 try { selfClient.destroy(); } catch(e){}
@@ -360,15 +425,6 @@ function startSpammerLoop(userId, slotIndex, tokens, text, channelId, delayMs) {
     spammerLoops.set(key, initialTimeout);
 }
 
-function cleanRpcImageLink(linkStr) {
-    if (!linkStr) return undefined;
-    if (linkStr.startsWith("http")) {
-        return `mp:external/` + linkStr.replace(/^https?:\/\//, "");
-    }
-    return linkStr;
-}
-
-// Helper to reboot an explicit individual session array instance smoothly
 async function reinitializeSingleSlot(userId, userSessions, slotIndex, interaction) {
     const backup = {
         serverId: userSessions[slotIndex].serverId,
@@ -399,30 +455,6 @@ async function reinitializeSingleSlot(userId, userSessions, slotIndex, interacti
         return false;
     }
 }
-
-// ==========================================
-// OWNER SUPPORT PANEL HANDLERS (&setup)
-// ==========================================
-mainBot.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.content.startsWith(prefix)) return;
-
-    const args = message.content.slice(prefix.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-
-    if (command === 'setup') {
-        if (message.author.id !== OWNER_ID) return;
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('setup_btn_mode').setLabel('Buttons Interface Mode').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('setup_menu_mode').setLabel('Select Menu Dropdown Mode').setStyle(ButtonStyle.Secondary)
-        );
-
-        return message.reply({
-            content: "🛠️ **Select your preferred layout implementation style for the Support Panel deployment below:**",
-            components: [row]
-        });
-    }
-});
 
 // ==========================================
 // INTERACTION CONTROLLER
@@ -578,7 +610,6 @@ mainBot.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // Displays full matching token data directly
     if (commandName === '247-storage') {
         if (userSessions.length === 0) return interaction.reply({ content: MESSAGES.noActiveSessions, ephemeral: true }).catch(() => null);
         
@@ -634,7 +665,6 @@ mainBot.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // TARGETED RESTART CAPABILITIES SCRIPT
     if (commandName === '247-restart') {
         await interaction.deferReply({ ephemeral: true }).catch(() => null);
         if (userSessions.length === 0) return interaction.editReply(MESSAGES.noActiveSessions).catch(() => null);
@@ -650,7 +680,6 @@ mainBot.on('interactionCreate', async (interaction) => {
             await reinitializeSingleSlot(user.id, userSessions, sessionIndex, interaction);
             return interaction.editReply(`**<a:rSuccess:1494078302632149083> Reset and re-synchronized session slot ${slotOpt} safely!**`).catch(() => null);
         } else {
-            // Full system flush default
             await interaction.editReply(MESSAGES.restartingAll).catch(() => null);
             const originalBackups = JSON.parse(JSON.stringify(userSessions.map(s => ({
                 serverId: s.serverId,
@@ -721,7 +750,6 @@ mainBot.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: MESSAGES.allStopped, ephemeral: true }).catch(() => null);
     }
 
-    // TARGETED /CHANGE-PLACE CAPABILITIES
     if (commandName === 'change-place') {
         await interaction.deferReply({ ephemeral: true }).catch(() => null);
         if (userSessions.length === 0) return interaction.editReply(MESSAGES.noActiveSessions).catch(() => null);
@@ -741,21 +769,20 @@ mainBot.on('interactionCreate', async (interaction) => {
             for (const t of session.tokens) {
                 try {
                     sendVoicePayload(t.selfClient, newServerId, newChannelId, t.muted, t.deafened, t.camera);
-                    if (t.live) t.selfClient.ws.broadcast(buildStreamPayload(newServerId, newChannelId, true));
+                    sendStreamPayload(t.selfClient, newServerId, newChannelId, t.live);
                     t.serverId = newServerId; 
                     t.channelId = newChannelId;
                 } catch (e) {}
             }
             return interaction.editReply(MESSAGES.slotRelocated(slotOpt)).catch(() => null);
         } else {
-            // Move all running sessions together if slot option skipped
             for (const session of userSessions) {
                 session.serverId = newServerId;
                 session.channelId = newChannelId;
                 for (const t of session.tokens) {
                     try {
                         sendVoicePayload(t.selfClient, newServerId, newChannelId, t.muted, t.deafened, t.camera);
-                        if (t.live) t.selfClient.ws.broadcast(buildStreamPayload(newServerId, newChannelId, true));
+                        sendStreamPayload(t.selfClient, newServerId, newChannelId, t.live);
                         t.serverId = newServerId; 
                         t.channelId = newChannelId;
                     } catch (e) {}
@@ -768,57 +795,99 @@ mainBot.on('interactionCreate', async (interaction) => {
     if (commandName === '247-mute') {
         if (userSessions.length === 0) return interaction.reply({ content: MESSAGES.noActiveSessions, ephemeral: true }).catch(() => null);
         const status = options.getBoolean('status');
-        
-        userSessions.forEach(session => {
-            session.tokens.forEach(t => {
+        const slotOpt = options.getInteger('slot');
+
+        if (slotOpt) {
+            const idx = slotOpt - 1;
+            if (!userSessions[idx]) return interaction.reply({ content: `❌ Slot ${slotOpt} is currently empty.`, ephemeral: true });
+            userSessions[idx].tokens.forEach(t => {
                 t.muted = status;
                 sendVoicePayload(t.selfClient, t.serverId, t.channelId, status, t.deafened, t.camera);
             });
-        });
-        return interaction.reply({ content: status ? MESSAGES.altMuted : MESSAGES.altUnmuted }).catch(() => null);
+            return interaction.reply({ content: status ? MESSAGES.altMuted(`Slot ${slotOpt}`) : MESSAGES.altUnmuted(`Slot ${slotOpt}`) });
+        } else {
+            userSessions.forEach(session => {
+                session.tokens.forEach(t => {
+                    t.muted = status;
+                    sendVoicePayload(t.selfClient, t.serverId, t.channelId, status, t.deafened, t.camera);
+                });
+            });
+            return interaction.reply({ content: status ? MESSAGES.altMuted("all active slots") : MESSAGES.altUnmuted("all active slots") });
+        }
     }
 
     if (commandName === '247-deaf') {
         if (userSessions.length === 0) return interaction.reply({ content: MESSAGES.noActiveSessions, ephemeral: true }).catch(() => null);
         const status = options.getBoolean('status');
-        
-        userSessions.forEach(session => {
-            session.tokens.forEach(t => {
+        const slotOpt = options.getInteger('slot');
+
+        if (slotOpt) {
+            const idx = slotOpt - 1;
+            if (!userSessions[idx]) return interaction.reply({ content: `❌ Slot ${slotOpt} is currently empty.`, ephemeral: true });
+            userSessions[idx].tokens.forEach(t => {
                 t.deafened = status;
                 sendVoicePayload(t.selfClient, t.serverId, t.channelId, t.muted, status, t.camera);
             });
-        });
-        return interaction.reply({ content: status ? MESSAGES.altDeafened : MESSAGES.altUndeafened }).catch(() => null);
+            return interaction.reply({ content: status ? MESSAGES.altDeafened(`Slot ${slotOpt}`) : MESSAGES.altUndeafened(`Slot ${slotOpt}`) });
+        } else {
+            userSessions.forEach(session => {
+                session.tokens.forEach(t => {
+                    t.deafened = status;
+                    sendVoicePayload(t.selfClient, t.serverId, t.channelId, t.muted, status, t.camera);
+                });
+            });
+            return interaction.reply({ content: status ? MESSAGES.altDeafened("all active slots") : MESSAGES.altUndeafened("all active slots") });
+        }
     }
 
     if (commandName === '247-camera') {
         if (userSessions.length === 0) return interaction.reply({ content: MESSAGES.noActiveSessions, ephemeral: true }).catch(() => null);
         const status = options.getBoolean('status');
+        const slotOpt = options.getInteger('slot');
 
-        userSessions.forEach(session => {
-            session.tokens.forEach(t => {
+        if (slotOpt) {
+            const idx = slotOpt - 1;
+            if (!userSessions[idx]) return interaction.reply({ content: `❌ Slot ${slotOpt} is currently empty.`, ephemeral: true });
+            userSessions[idx].tokens.forEach(t => {
                 t.camera = status;
                 sendVoicePayload(t.selfClient, t.serverId, t.channelId, t.muted, t.deafened, status);
             });
-        });
-        return interaction.reply({ content: MESSAGES.cameraUpdated(status ? "on" : "off") }).catch(() => null);
+            return interaction.reply({ content: MESSAGES.cameraUpdated(`Slot ${slotOpt}`, status ? "on" : "off") });
+        } else {
+            userSessions.forEach(session => {
+                session.tokens.forEach(t => {
+                    t.camera = status;
+                    sendVoicePayload(t.selfClient, t.serverId, t.channelId, t.muted, t.deafened, status);
+                });
+            });
+            return interaction.reply({ content: MESSAGES.cameraUpdated("all active slots", status ? "on" : "off") });
+        }
     }
 
     if (commandName === '247-live-badge') {
         if (userSessions.length === 0) return interaction.reply({ content: MESSAGES.noActiveSessions, ephemeral: true }).catch(() => null);
         const status = options.getBoolean('status');
+        const slotOpt = options.getInteger('slot');
 
-        userSessions.forEach(session => {
-            session.tokens.forEach(t => {
+        if (slotOpt) {
+            const idx = slotOpt - 1;
+            if (!userSessions[idx]) return interaction.reply({ content: `❌ Slot ${slotOpt} is currently empty.`, ephemeral: true });
+            userSessions[idx].tokens.forEach(t => {
                 t.live = status;
-                try {
-                    t.selfClient.ws.broadcast(buildStreamPayload(t.serverId, t.channelId, status));
-                } catch(e){
-                    console.error("Live stream state dispatch failure:", e);
-                }
+                sendStreamPayload(t.selfClient, t.serverId, t.channelId, status);
+                sendVoicePayload(t.selfClient, t.serverId, t.channelId, t.muted, t.deafened, t.camera);
             });
-        });
-        return interaction.reply({ content: MESSAGES.liveUpdated(status ? "on" : "off") }).catch(() => null);
+            return interaction.reply({ content: MESSAGES.liveUpdated(`Slot ${slotOpt}`, status ? "on" : "off") });
+        } else {
+            userSessions.forEach(session => {
+                session.tokens.forEach(t => {
+                    t.live = status;
+                    sendStreamPayload(t.selfClient, t.serverId, t.channelId, status);
+                    sendVoicePayload(t.selfClient, t.serverId, t.channelId, t.muted, t.deafened, t.camera);
+                });
+            });
+            return interaction.reply({ content: MESSAGES.liveUpdated("all active slots", status ? "on" : "off") });
+        }
     }
 
     if (commandName === '247-status') {
@@ -835,7 +904,7 @@ mainBot.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: MESSAGES.statusUpdated(statusDisplayNames[statusType]) }).catch(() => null);
     }
 
-    // FIXED RPC SYNTAX ENGINE HANDLER
+    // UNIFIED RICH PRESENCE COMMAND (TEXT + MEDIA LINKED)
     if (commandName === '247-rpc') {
         await interaction.deferReply({ ephemeral: true }).catch(() => null);
         if (userSessions.length === 0) return interaction.editReply(MESSAGES.noActiveSessions).catch(() => null);
@@ -844,78 +913,77 @@ mainBot.on('interactionCreate', async (interaction) => {
         const name = options.getString('name') || "Activity";
         const state = options.getString('state') || "";
         const url = options.getString('url') || "https://twitch.tv/directory";
-        const customAppId = options.getString('application-id');
+        const customAppId = options.getString('application-id') || (activityType === 'LISTENING' ? '232924151325491200' : '1213034914101137458');
+        
+        // Accepting text and images right inside the same configuration setup
+        const largeImage = options.getString('large-image') || undefined;
+        const smallImage = options.getString('small-image') || undefined;
 
-        userSessions.forEach(session => {
-            session.tokens.forEach(t => {
-                try {
-                    if (activityType === 'CLEAR') {
-                        t.selfClient.user.setActivity(null);
-                        return;
-                    }
-
-                    // Passing client dependency directly solves the signature mismatch runtime exception
-                    const pr = new RichPresence(t.selfClient);
-                    const resolvedAppId = customAppId || (activityType === 'LISTENING' ? '232924151325491200' : '1213034914101137458');
-                    
-                    pr.setApplicationId(resolvedAppId);
-                    pr.setType(activityType)
-                      .setName(name)
-                      .setState(state);
-
-                    if (activityType === 'STREAMING') pr.setURL(url);
-                    if (activityType === 'LISTENING') pr.setStartTimestamp(Date.now());
-
-                    t.selfClient.user.setActivity(pr);
-                } catch (e) {
-                    console.error("Failed syncing profile activity structure:", e);
-                }
-            });
+        savedRpcLayouts.set(user.id, {
+            enabled: true,
+            activityType,
+            name,
+            state,
+            url,
+            applicationId: customAppId,
+            largeImage,
+            smallImage
         });
 
-        return interaction.editReply({ content: activityType === 'CLEAR' ? "🗑️ Rich Presence wiped completely clean." : "🎮 Text layouts updated! Use `/247-rpc-assets` to add images directly from your gallery fields." });
+        userSessions.forEach(session => {
+            session.tokens.forEach(t => syncRichPresenceToClient(t));
+        });
+
+        return interaction.editReply({ content: "🎮 **Rich Presence setup fully loaded and bound dynamically!** Emojis and assets synchronized text parameters successfully." });
     }
 
-    // DIRECT GALLERY ASSETS UPLOADER IMPLEMENTATION
-    if (commandName === '247-rpc-assets') {
+    // UNIFIED EDIT COMMAND
+    if (commandName === '247-rpc-edit') {
         await interaction.deferReply({ ephemeral: true }).catch(() => null);
         if (userSessions.length === 0) return interaction.editReply(MESSAGES.noActiveSessions).catch(() => null);
 
-        const largeImgAttachment = options.getAttachment('large-image');
-        const smallBadgeAttachment = options.getAttachment('small-badge');
+        const savedLayout = savedRpcLayouts.get(user.id);
+        if (!savedLayout) {
+            return interaction.editReply({ content: "❌ No existing configuration map found to update. Run `/247-rpc` first." });
+        }
+
+        const nameOpt = options.getString('name');
+        const stateOpt = options.getString('state');
+        const urlOpt = options.getString('url');
+        const largeImgOpt = options.getString('large-image');
+        const smallImgOpt = options.getString('small-image');
+
+        if (nameOpt !== null) savedLayout.name = nameOpt;
+        if (stateOpt !== null) savedLayout.state = stateOpt;
+        if (urlOpt !== null) savedLayout.url = urlOpt;
+        if (largeImgOpt !== null) savedLayout.largeImage = largeImgOpt;
+        if (smallImgOpt !== null) savedLayout.smallImage = smallImgOpt;
 
         userSessions.forEach(session => {
-            session.tokens.forEach(t => {
-                try {
-                    // Pull present activity frame running inside current instance
-                    const presence = t.selfClient.user.presence;
-                    if (!presence || !presence.activities.length) return;
-
-                    const activeActivity = presence.activities[0];
-                    const pr = new RichPresence(t.selfClient);
-
-                    pr.setApplicationId(activeActivity.applicationId);
-                    pr.setType(activeActivity.type)
-                      .setName(activeActivity.name)
-                      .setState(activeActivity.state || "");
-
-                    if (activeActivity.url) pr.setURL(activeActivity.url);
-                    
-                    // Maintain older state files if values aren't explicitly passed
-                    let largeLink = largeImgAttachment ? largeImgAttachment.url : activeActivity.assets?.largeImage;
-                    let smallLink = smallBadgeAttachment ? smallBadgeAttachment.url : activeActivity.assets?.smallImage;
-
-                    if (largeLink) pr.setLargeImage(cleanRpcImageLink(largeLink));
-                    if (smallLink) pr.setSmallImage(cleanRpcImageLink(smallLink));
-
-                    t.selfClient.user.setActivity(pr);
-                } catch(e) {
-                    console.error("Failed modifying asset structure frames:", e);
-                }
-            });
+            session.tokens.forEach(t => syncRichPresenceToClient(t));
         });
 
-        return interaction.editReply({ content: "🖼️ **Gallery assets matched and linked straight into your active profiles successfully!**" });
+        return interaction.editReply({ content: "📝 **Rich Presence properties and media paths updated simultaneously.**" });
+    }
+
+    if (commandName === '247-rpc-toggle') {
+        await interaction.deferReply({ ephemeral: true }).catch(() => null);
+        if (userSessions.length === 0) return interaction.editReply(MESSAGES.noActiveSessions).catch(() => null);
+
+        const status = options.getBoolean('status');
+        const savedLayout = savedRpcLayouts.get(user.id);
+
+        if (!savedLayout) {
+            return interaction.editReply({ content: "❌ No saved RPC parameters found to toggle. Run `/247-rpc` first." });
+        }
+
+        savedLayout.enabled = status;
+
+        userSessions.forEach(session => {
+            session.tokens.forEach(t => syncRichPresenceToClient(t));
+        });
+
+        return interaction.editReply({ content: status ? "🟢 Custom Rich Presence state turned **ON**." : "🔴 Custom Rich Presence state turned **OFF** (hidden)." });
     }
 
     if (commandName === '247-spammer') {
@@ -955,7 +1023,7 @@ mainBot.on('interactionCreate', async (interaction) => {
             session.tokens.forEach((t, tIdx) => {
                 const gName = t.selfClient.guilds.cache.get(t.serverId)?.name || "Unknown Server";
                 const cName = t.selfClient.channels.cache.get(t.channelId)?.name || "Unknown Channel";
-                resText += `<a:rArrow:1493252548826763275> Account ${tIdx + 1}: **${t.username}** | Voice: \`${cName}\` | Server: \`${gName}\`\n`;
+                resText += `<a:rArrow:1493252548826763275> Account ${tIdx + 1}: **${t.username}** | Voice: \`${cName}\` | Server: \`${gName}\` | Live Badge: \`${t.live ? "ON" : "OFF"}\`\n`;
             });
             resText += `\n`;
         });
