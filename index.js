@@ -166,7 +166,7 @@ mainBot.once('ready', async () => {
         },
         {
             name: '247-rpc',
-            description: 'Configure Rich Presence layouts (Text & Media unified combined)',
+            description: 'Configure Rich Presence layouts (Accepts direct image URLs or Application Gallery keys)',
             options: [
                 {
                     name: 'activity-type',
@@ -185,8 +185,8 @@ mainBot.once('ready', async () => {
                 { name: 'state', description: 'Secondary subtext info line detail', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'url', description: 'Stream link (Required for STREAMING type)', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'application-id', description: 'Custom Application Client ID override', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'large-image', description: 'Large picture media link or text asset key string', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'small-image', description: 'Small round badge picture link or asset key string', type: ApplicationCommandOptionType.String, required: false }
+                { name: 'large-image', description: 'Direct image link OR Application Rich Presence Asset Key string', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'small-image', description: 'Direct round image link OR Application Rich Presence Asset Key string', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
         {
@@ -196,8 +196,8 @@ mainBot.once('ready', async () => {
                 { name: 'name', description: 'Update status title name text', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'state', description: 'Update secondary subtext line detail', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'url', description: 'Update streaming channel link', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'large-image', description: 'Update large picture media asset asset link', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'small-image', description: 'Update small round badge asset link', type: ApplicationCommandOptionType.String, required: false }
+                { name: 'large-image', description: 'Update large image link OR gallery asset text key string', type: ApplicationCommandOptionType.String, required: false },
+                { name: 'small-image', description: 'Update small image link OR gallery asset text key string', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
         {
@@ -239,17 +239,19 @@ function sendVoicePayload(client, serverId, channelId, mute=false, deaf=false, v
     }
 }
 
-// Fixed core voice payload stream parser loop configuration block
+// FIXED: Gracefully closes stream visibility via op: 18 without breaking client connection state loops
 const sendStreamPayload = (client, serverId, channelId, active) => {
     try {
         client.ws.broadcast({
             op: 18, 
-            d: active ? {
+            d: {
                 type: "guild",
                 guild_id: serverId,
                 channel_id: channelId,
-                preferred_region: null
-            } : null
+                preferred_region: null,
+                // Passing false here stops the stream packet properly instead of crashing with a fully empty object
+                active: active 
+            }
         });
     } catch(e) {
         console.error("Failed handling live gateway broadcasting parameters:", e);
@@ -277,8 +279,21 @@ function syncRichPresenceToClient(t) {
             pr.setStartTimestamp(Date.now());
         }
         
-        if (savedLayout.largeImage) pr.setLargeImage(savedLayout.largeImage);
-        if (savedLayout.smallImage) pr.setSmallImage(savedLayout.smallImage);
+        // Flexible Image Parsing Strategy (Supports direct Web Links or Developer Gallery application keys)
+        if (savedLayout.largeImage) {
+            if (savedLayout.largeImage.startsWith('http://') || savedLayout.largeImage.startsWith('https://')) {
+                pr.setLargeImage(savedLayout.largeImage);
+            } else {
+                pr.largeImage = savedLayout.largeImage; // Direct structural fallback for dashboard custom gallery assets keys
+            }
+        }
+        if (savedLayout.smallImage) {
+            if (savedLayout.smallImage.startsWith('http://') || savedLayout.smallImage.startsWith('https://')) {
+                pr.setSmallImage(savedLayout.smallImage);
+            } else {
+                pr.smallImage = savedLayout.smallImage; // Direct structural fallback for dashboard custom gallery assets keys
+            }
+        }
 
         t.selfClient.user.setActivity(pr);
     } catch (e) {
@@ -904,7 +919,6 @@ mainBot.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: MESSAGES.statusUpdated(statusDisplayNames[statusType]) }).catch(() => null);
     }
 
-    // UNIFIED RICH PRESENCE COMMAND (TEXT + MEDIA LINKED)
     if (commandName === '247-rpc') {
         await interaction.deferReply({ ephemeral: true }).catch(() => null);
         if (userSessions.length === 0) return interaction.editReply(MESSAGES.noActiveSessions).catch(() => null);
@@ -915,7 +929,6 @@ mainBot.on('interactionCreate', async (interaction) => {
         const url = options.getString('url') || "https://twitch.tv/directory";
         const customAppId = options.getString('application-id') || (activityType === 'LISTENING' ? '232924151325491200' : '1213034914101137458');
         
-        // Accepting text and images right inside the same configuration setup
         const largeImage = options.getString('large-image') || undefined;
         const smallImage = options.getString('small-image') || undefined;
 
@@ -934,10 +947,9 @@ mainBot.on('interactionCreate', async (interaction) => {
             session.tokens.forEach(t => syncRichPresenceToClient(t));
         });
 
-        return interaction.editReply({ content: "🎮 **Rich Presence setup fully loaded and bound dynamically!** Emojis and assets synchronized text parameters successfully." });
+        return interaction.editReply({ content: "🎮 **Rich Presence setup fully loaded and bound dynamically!** Image inputs parse external URLs and app asset keys accurately now." });
     }
 
-    // UNIFIED EDIT COMMAND
     if (commandName === '247-rpc-edit') {
         await interaction.deferReply({ ephemeral: true }).catch(() => null);
         if (userSessions.length === 0) return interaction.editReply(MESSAGES.noActiveSessions).catch(() => null);
@@ -963,7 +975,7 @@ mainBot.on('interactionCreate', async (interaction) => {
             session.tokens.forEach(t => syncRichPresenceToClient(t));
         });
 
-        return interaction.editReply({ content: "📝 **Rich Presence properties and media paths updated simultaneously.**" });
+        return interaction.editReply({ content: "📝 **Rich Presence properties and image paths updated simultaneously.**" });
     }
 
     if (commandName === '247-rpc-toggle') {
