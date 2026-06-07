@@ -186,12 +186,7 @@ mainBot.once('ready', async () => {
                 { name: 'url', description: 'Stream link (Required for STREAMING type)', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'application-id', description: 'Custom Application Client ID override', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'large-image', description: 'Developer Gallery Asset Name string OR direct image link URL', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'small-image', description: 'Developer Gallery Asset Name string OR direct round image link URL', type: ApplicationCommandOptionType.String, required: false },
-                // ADDED: RPC Button Configuration Parameters
-                { name: 'button1-text', description: 'Text label for the first button', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'button1-url', description: 'Web URL context link for the first button', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'button2-text', description: 'Text label for the second button', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'button2-url', description: 'Web URL context link for the second button', type: ApplicationCommandOptionType.String, required: false }
+                { name: 'small-image', description: 'Developer Gallery Asset Name string OR direct round image link URL', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
         {
@@ -202,12 +197,7 @@ mainBot.once('ready', async () => {
                 { name: 'state', description: 'Update secondary subtext line detail', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'url', description: 'Update streaming channel link', type: ApplicationCommandOptionType.String, required: false },
                 { name: 'large-image', description: 'Update gallery asset text name OR image web link', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'small-image', description: 'Update gallery asset text name OR image web link', type: ApplicationCommandOptionType.String, required: false },
-                // ADDED: RPC Button Modification Parameters
-                { name: 'button1-text', description: 'Change first button label text', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'button1-url', description: 'Change first button web redirect URL link', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'button2-text', description: 'Change second button label text', type: ApplicationCommandOptionType.String, required: false },
-                { name: 'button2-url', description: 'Change second button web redirect URL link', type: ApplicationCommandOptionType.String, required: false }
+                { name: 'small-image', description: 'Update gallery asset text name OR image web link', type: ApplicationCommandOptionType.String, required: false }
             ]
         },
         {
@@ -266,7 +256,6 @@ const sendStreamPayload = (client, serverId, channelId, active) => {
     }
 };
 
-// UPDATED: Now parses and attaches custom buttons natively via .addButton()
 function syncRichPresenceToClient(t) {
     const savedLayout = savedRpcLayouts.get(t.userId);
     if (!savedLayout || !savedLayout.enabled) {
@@ -293,14 +282,6 @@ function syncRichPresenceToClient(t) {
         }
         if (savedLayout.smallImage) {
             pr.setSmallImage(savedLayout.smallImage);
-        }
-
-        // ADDED: Attach Custom Activity Buttons cleanly
-        if (savedLayout.button1Text && savedLayout.button1Url) {
-            pr.addButton(savedLayout.button1Text, savedLayout.button1Url);
-        }
-        if (savedLayout.button2Text && savedLayout.button2Url) {
-            pr.addButton(savedLayout.button2Text, savedLayout.button2Url);
         }
 
         t.selfClient.user.setActivity(pr);
@@ -940,12 +921,6 @@ mainBot.on('interactionCreate', async (interaction) => {
         const largeImage = options.getString('large-image') || undefined;
         const smallImage = options.getString('small-image') || undefined;
 
-        // UPDATED: Retrieve values for optional layout buttons
-        const button1Text = options.getString('button1-text') || undefined;
-        const button1Url = options.getString('button1-url') || undefined;
-        const button2Text = options.getString('button2-text') || undefined;
-        const button2Url = options.getString('button2-url') || undefined;
-
         savedRpcLayouts.set(user.id, {
             enabled: true,
             activityType,
@@ -954,18 +929,14 @@ mainBot.on('interactionCreate', async (interaction) => {
             url,
             applicationId: customAppId,
             largeImage,
-            smallImage,
-            button1Text,
-            button1Url,
-            button2Text,
-            button2Url
+            smallImage
         });
 
         userSessions.forEach(session => {
             session.tokens.forEach(t => syncRichPresenceToClient(t));
         });
 
-        return interaction.editReply({ content: "🎮 **Rich Presence setup fully loaded and bound dynamically!** Custom activity redirection buttons attached successfully." });
+        return interaction.editReply({ content: "🎮 **Rich Presence setup fully loaded and bound dynamically!**" });
     }
 
     if (commandName === '247-rpc-edit') {
@@ -982,29 +953,18 @@ mainBot.on('interactionCreate', async (interaction) => {
         const urlOpt = options.getString('url');
         const largeImgOpt = options.getString('large-image');
         const smallImgOpt = options.getString('small-image');
-        
-        // UPDATED: Option mapping for button modification inputs
-        const btn1TextOpt = options.getString('button1-text');
-        const btn1UrlOpt = options.getString('button1-url');
-        const btn2TextOpt = options.getString('button2-text');
-        const btn2UrlOpt = options.getString('button2-url');
 
         if (nameOpt !== null) savedLayout.name = nameOpt;
         if (stateOpt !== null) savedLayout.state = stateOpt;
         if (urlOpt !== null) savedLayout.url = urlOpt;
         if (largeImgOpt !== null) savedLayout.largeImage = largeImgOpt;
         if (smallImgOpt !== null) savedLayout.smallImage = smallImgOpt;
-        
-        if (btn1TextOpt !== null) savedLayout.button1Text = btn1TextOpt;
-        if (btn1UrlOpt !== null) savedLayout.button1Url = btn1UrlOpt;
-        if (btn2TextOpt !== null) savedLayout.button2Text = btn2TextOpt;
-        if (btn2UrlOpt !== null) savedLayout.button2Url = btn2UrlOpt;
 
         userSessions.forEach(session => {
             session.tokens.forEach(t => syncRichPresenceToClient(t));
         });
 
-        return interaction.editReply({ content: "📝 **Rich Presence properties, layout image paths, and button configurations updated simultaneously.**" });
+        return interaction.editReply({ content: "📝 **Rich Presence properties and layout image paths updated simultaneously.**" });
     }
 
     if (commandName === '247-rpc-toggle') {
